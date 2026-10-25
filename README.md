@@ -10,26 +10,47 @@ and PC **coordinate**: the device that is losing the headphones releases them on
 purpose and pauses its media, so the other device can connect immediately instead of
 "stealing" the connection.
 
-> Status: **Phase 0 (feasibility spikes) complete** on the owner's Infinix Hot 20i (Android 12) + Windows 10 laptop.
-> See [docs/spikes/](docs/spikes/). No app build yet.
+> Status: **0.2.0 preview**: working Android and Windows apps, being tested with friends.
 
-## Targets
+## Download
+
+Latest release: **[StinePods 0.2.0](https://github.com/austinedearan-stack/stinepods/releases/tag/v0.2.0)** (setup steps and checksums are on that page)
+
+| | File | For |
+|---|---|---|
+| Phone (recommended) | [StinePods.apk](https://github.com/austinedearan-stack/stinepods/releases/download/v0.2.0/StinePods.apk) | Android 10 – 16 |
+| Phone, with per-app rules | [StinePods-full.apk](https://github.com/austinedearan-stack/stinepods/releases/download/v0.2.0/StinePods-full.apk) | Android 10 – 16 (Google may block this one when sideloaded in some countries) |
+| PC | [StinePods.exe](https://github.com/austinedearan-stack/stinepods/releases/download/v0.2.0/StinePods.exe) | Windows 10 / 11, 64-bit; one file, nothing else to install |
+
+**Quick setup:** pair phone ↔ PC ↔ headphones over Bluetooth → run `StinePods.exe` on the PC → install the APK
+on the phone, open it, tap **Fix** on each setup item, choose your PC and headphones → confirm the 6-digit code on
+both screens.
+
+## Platforms
 
 | Platform | Versions | Status |
 |---|---|---|
-| Android | 12 – 17, many OEMs | planned |
-| Windows | 10 and 11 | planned |
+| Android | 10 – 16 | preview (tested on Android 10 and 12) |
+| Windows | 10 and 11 | preview (tested on Windows 10) |
 | Linux | — | later |
 
 ## Repo layout
 
 ```
-android/    Android app (Kotlin)
-desktop/    Desktop app (.NET + Avalonia; Windows now, Linux later)
+android/    Android app (Kotlin): "lite" and "full" flavors
+desktop/    Windows tray app (.NET 10) + shared core and tests
 protocol/   Phone<->PC protocol spec + shared test vectors
-spikes/     Throwaway Phase 0 experiments
-docs/       Plan, hurdles, security, decisions, open questions
+spikes/     Phase 0 experiments
+tools/      serve.cs: share the built apps on the local network
+docs/       Plan, hurdles, security, decisions, spike results
 ```
+
+## Building
+
+- **Windows:** `powershell -ExecutionPolicy Bypass -File desktop\publish.ps1` → `dist\windows\StinePods.exe`
+- **Android:** `cd android && ./gradlew assembleLiteRelease` → `app/build/outputs/apk/lite/release/`
+- **Tests:** `dotnet test desktop/StinePods.Core.Tests` (spec scenarios + 1200 two-device simulations) and
+  `cd android && ./gradlew testLiteDebugUnitTest`
 
 ## Docs
 
