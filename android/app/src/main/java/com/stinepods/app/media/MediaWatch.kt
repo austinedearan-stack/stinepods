@@ -10,13 +10,22 @@ import android.media.session.MediaSession
 import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
 import android.os.Handler
+import android.os.SystemClock
+import android.view.KeyEvent
+import com.stinepods.app.BuildConfig
 import com.stinepods.app.Diag
-import com.stinepods.app.MediaAccess
 
 /**
- * Local playback (docs/spikes/S3-S4-media-detection.md). An app counts as playing when its media session says
- * PLAYING *and* something is actually producing media audio on the phone, which filters out Spotify Connect sessions
- * that are playing on another device. Needs notification-listener access ([MediaAccess]). Callbacks on [handler].
+ * Local playback (docs/spikes/S3-S4-media-detection.md).
+ *
+ * - **Full build** with notification-listener access: an app counts as playing when its media session says PLAYING
+ *   *and* something is actually producing media audio (filters out Spotify Connect sessions playing elsewhere); apps
+ *   are paused/resumed through their sessions. Audio without a session is reported as [OTHER].
+ * - **Lite build** (no notification-listener permission, so Play Protect's fraud protection doesn't block sideloading
+ *   it) or no access granted: any sustained media audio is reported as [OTHER], and pause/resume go through the
+ *   standard media keys, like a headset's play/pause button.
+ *
+ * Callbacks on [handler].
  */
 class MediaWatch(
     private val context: Context,
@@ -28,45 +37,60 @@ class MediaWatch(
 ) {
     private val sessions = context.getSystemService(MediaSessionManager::class.java)
     private val audio = context.getSystemService(AudioManager::class.java)
-    private val component = ComponentName(context, MediaAccess::class.java)
+    // By name: the listener class only exists in the full build.
+    private val component = ComponentName(context.packageName, "com.stinepods.app.MediaAccess")
     private val controllers = mutableMapOf<MediaSession.Token, MediaController>()
     private val reported = mutableMapOf<String, Boolean>()
     private var players = 0
     var running = false
         private set
+    /** Media sessions are visible (full build with access granted); otherwise everything is [OTHER]. */
+    var sessionsVisible = false
+        private set
 
-    /** Returns false when notification-listener access hasn't been granted yet. */
-    fun start(): Boolean {
-        if (running) return true
-        try {
-            sessions.addOnActiveSessionsChangedListener(sessionsChanged, component, handler)
-            onSessions(sessions.getActiveSessions(component))
-        } catch (e: SecurityException) {
-            Diag.warn("media: no notification access yet")
-            return false
+    fun start() {
+        if (!running) {
+            audio.registerAudioPlaybackCallback(playbackCallback, handler)
+            players = countPlayers(audio.activePlaybackConfigurations)
+            running = true
         }
-        audio.registerAudioPlaybackCallback(playbackCallback, handler)
-        players = countPlayers(audio.activePlaybackConfigurations)
-        running = true
+        if (BuildConfig.FULL && !sessionsVisible) {
+            try {
+                sessions.addOnActiveSessionsChangedListener(sessionsChanged, component, handler)
+                sessionsVisible = true
+                onSessions(sessions.getActiveSessions(component))
+            } catch (e: SecurityException) {
+                Diag.warn("media: no notification access yet; using media keys")
+            }
+        }
         recompute()
-        return true
     }
 
     fun stop() {
         if (!running) return
-        sessions.removeOnActiveSessionsChangedListener(sessionsChanged)
+        if (sessionsVisible) sessions.removeOnActiveSessionsChangedListener(sessionsChanged)
         audio.unregisterAudioPlaybackCallback(playbackCallback)
         controllers.values.forEach { it.unregisterCallback(controllerCallback) }
         controllers.clear()
         running = false
+        sessionsVisible = false
     }
 
-    fun pause(app: String) = control(app) { it.transportControls.pause() }
-    fun play(app: String) = control(app) { it.transportControls.play() }
+    /** Pauses an app; [OTHER] (or a lite build) uses the media key, which reaches whatever is playing. */
+    fun pause(app: String) = control(app, KeyEvent.KEYCODE_MEDIA_PAUSE) { it.transportControls.pause() }
+    fun play(app: String) = control(app, KeyEvent.KEYCODE_MEDIA_PLAY) { it.transportControls.play() }
 
-    private fun control(app: String, op: (MediaController) -> Unit): Boolean {
-        val c = controllers.values.firstOrNull { it.packageName == app } ?: return false
-        op(c)
+    private fun control(app: String, key: Int, op: (MediaController) -> Unit): Boolean {
+        val c = controllers.values.firstOrNull { it.packageName == app }
+        if (c != null) {
+            op(c)
+            return true
+        }
+        // With sessions visible, OTHER is audio from an app without a session: a media key would reach some other
+        // (paused) session instead, e.g. start Spotify. Without sessions, the media key is the right tool.
+        if (app != OTHER || sessionsVisible) return false
+        audio.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, key))
+        audio.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, key))
         return true
     }
 
@@ -117,10 +141,10 @@ class MediaWatch(
             handler.removeCallbacks(otherConfirm)
             otherSince = 0
         } else if (otherSince == 0L) {
-            otherSince = android.os.SystemClock.elapsedRealtime()
+            otherSince = SystemClock.elapsedRealtime()
             handler.postDelayed(otherConfirm, OTHER_CONFIRM_MS)
         }
-        if (unattributed && otherSince != 0L && android.os.SystemClock.elapsedRealtime() - otherSince >= OTHER_CONFIRM_MS) {
+        if (unattributed && otherSince != 0L && SystemClock.elapsedRealtime() - otherSince >= OTHER_CONFIRM_MS) {
             playingNow += OTHER
         }
 
@@ -137,7 +161,7 @@ class MediaWatch(
     private var otherSince = 0L
 
     companion object {
-        /** Engine app id for media audio from apps without a media session. */
+        /** Engine app id for media audio not attributed to a media session (every app in the lite build). */
         const val OTHER = "other"
         private const val OTHER_CONFIRM_MS = 1000L
         private val MEDIA_USAGES = setOf(AudioAttributes.USAGE_MEDIA, AudioAttributes.USAGE_GAME, AudioAttributes.USAGE_UNKNOWN)

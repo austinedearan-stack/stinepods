@@ -13,6 +13,13 @@
     <BuiltInComInteropSupport>false</BuiltInComInteropSupport>
     <InvariantGlobalization>true</InvariantGlobalization>
     <UseSystemResourceKeys>true</UseSystemResourceKeys>
+    <!-- Shown in Windows file properties and security prompts. -->
+    <Product>StinePods</Product>
+    <AssemblyTitle>StinePods</AssemblyTitle>
+    <Description>Makes your Bluetooth headphones follow your audio between your phone and this PC</Description>
+    <Company>stine</Company>
+    <Copyright>Copyright © 2026 stine</Copyright>
+    <Version>0.2.0</Version>
   </PropertyGroup>
 
   <ItemGroup>

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Full build only: media-session access via a notification listener (reads no notifications). Left out of the lite
+     build, because Play Protect's fraud protection blocks sideloaded apps that declare a notification listener. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <service
+            android:name=".MediaAccess"
+            android:exported="true"
+            android:label="StinePods media control"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+    </application>
+</manifest>

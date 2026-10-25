@@ -62,8 +62,8 @@ class Prefs(context: Context) {
         apps = rules(),
     )
 
-    /** Per-app rules with defaults applied: apps without media controls ask first (owner's choice). */
-    fun rules(): Map<String, AppRule> = mapOf(MediaWatch.OTHER to AppRule.ASK) + apps
+    /** Per-app rules with defaults applied. Full: apps without media controls ask first (owner's choice). Lite: all media is one "app", switching automatically. */
+    fun rules(): Map<String, AppRule> = mapOf(MediaWatch.OTHER to if (BuildConfig.FULL) AppRule.ASK else AppRule.AUTO) + apps
 
     private inline fun <reified E : Enum<E>> enumOr(name: String?, default: E): E =
         enumValues<E>().firstOrNull { it.name == name } ?: default

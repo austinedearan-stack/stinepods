@@ -188,16 +188,16 @@ class StinePodsService : Service() {
 
     private fun execute(a: Action) {
         when (a) {
-            // Apps without media controls can't be paused or resumed; they simply keep playing.
-            is Action.Pause -> if (a.app != MediaWatch.OTHER && !media.pause(a.app)) Diag.warn("pause ${a.app}: no session")
-            is Action.Resume -> if (a.app != MediaWatch.OTHER && !media.play(a.app)) Diag.warn("resume ${a.app}: no session")
+            // "other" goes through the media keys where that is safe (see MediaWatch); apps that ignore them keep playing.
+            is Action.Pause -> if (!media.pause(a.app) && a.app != MediaWatch.OTHER) Diag.warn("pause ${a.app}: no session")
+            is Action.Resume -> if (!media.play(a.app) && a.app != MediaWatch.OTHER) Diag.warn("resume ${a.app}: no session")
             is Action.Release -> profiles.release(a.h)
             // A take refused outright is reported like its timeout, so paused media resumes straight away.
             is Action.Take -> if (!profiles.take(a.h)) handler.post { fireNow("take") }
             is Action.Send -> session?.takeIf { it.ready }?.let { s -> conn?.send(s.send(a.m)) }
             is Action.Ask -> prompt(
                 N_ASK, "Switch headphones to this phone?",
-                if (a.app == MediaWatch.OTHER) "Audio started on this phone." else "${label(a.app)} started playing.",
+                if (a.app == MediaWatch.OTHER) (if (BuildConfig.FULL) "Audio started on this phone." else "Media started playing on this phone.") else "${label(a.app)} started playing.",
                 "Switch" to answer(a.id, true), "Not now" to answer(a.id, false),
             )
             is Action.StartTimer -> {
@@ -235,7 +235,7 @@ class StinePodsService : Service() {
         engine.settings.callsTakeHeadset = fresh.callsTakeHeadset
         engine.settings.apps = fresh.apps
         profiles.watch(fresh.headsets)
-        if (!media.running) media.start()
+        media.start()
         session?.takeIf { it.ready }?.let { s ->
             conn?.send(s.send(Msg("config", headsets = fresh.headsets, prefer = fresh.prefer, returnOnStop = fresh.returnOnStop)))
         }

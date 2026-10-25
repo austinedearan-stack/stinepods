@@ -172,8 +172,10 @@ class MainActivity : Activity() {
                 checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
                 requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 2)
             })
-            add(Triple("Media access: see and pause what's playing (no notifications are read)",
-                nm.isNotificationListenerAccessGranted(ComponentName(this@MainActivity, MediaAccess::class.java))) {
+            // Only the full build has the media-access listener (the lite build leaves it out so Play Protect lets
+            // people sideload it; it uses audio activity and media keys instead).
+            if (BuildConfig.FULL) add(Triple("Media access: see and pause what's playing (no notifications are read)",
+                nm.isNotificationListenerAccessGranted(ComponentName(packageName, MEDIA_ACCESS))) {
                 startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
             })
             add(Triple("Keep running in the background", getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(packageName)) {
@@ -184,7 +186,7 @@ class MainActivity : Activity() {
             card { add(TextView(this).apply { text = "✓  All set up"; textSize = 14f; setTextColor(accent) }, 0) }
             return
         }
-        val mediaOk = nm.isNotificationListenerAccessGranted(ComponentName(this, MediaAccess::class.java))
+        val mediaOk = !BuildConfig.FULL || nm.isNotificationListenerAccessGranted(ComponentName(packageName, MEDIA_ACCESS))
         card("Finish setting up") {
             for ((label, ok, fix) in items) statusRow(if (ok) "✓" else "!", if (ok) accent else warn, label, if (ok) null else ("Fix" to fix))
             if (!mediaOk && Compat.restrictedSettingsLikely) {
@@ -216,6 +218,7 @@ class MainActivity : Activity() {
     }
 
     private val warn = Color.rgb(230, 126, 34)
+    private val MEDIA_ACCESS = "com.stinepods.app.MediaAccess"   // full build only; referenced by name
 
     private fun statusRow(mark: String, color: Int, label: String, action: Pair<String, () -> Unit>?) {
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
@@ -244,7 +247,7 @@ class MainActivity : Activity() {
         AppRule.IGNORE -> "Never switch"
     }
 
-    private fun label(app: String) = if (app == MediaWatch.OTHER) "Other apps (Instagram, gallery videos, games…)" else runCatching {
+    private fun label(app: String) = if (app == MediaWatch.OTHER) (if (BuildConfig.FULL) "Other apps (Instagram, gallery videos, games…)" else "Media on this phone (any app)") else runCatching {
         packageManager.getApplicationLabel(packageManager.getApplicationInfo(app, 0)).toString()
     }.getOrDefault(app)
 
