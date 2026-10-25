@@ -57,20 +57,36 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         prefs = Prefs(this)
         page = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(20), dp(16), dp(32)) }
-        setContentView(ScrollView(this).apply { setBackgroundColor(bg); addView(page) })
+        val scroll = ScrollView(this).apply { setBackgroundColor(bg); addView(page) }
+        // Android 15+ draws apps edge to edge: keep content clear of the status and navigation bars.
+        scroll.setOnApplyWindowInsetsListener { v, insets -> v.setPadding(0, barTop(insets), 0, barBottom(insets)); insets }
+        setContentView(scroll)
+        @Suppress("DEPRECATION")
         window.statusBarColor = bg
         actionBar?.hide()
     }
+
+    @Suppress("DEPRECATION")
+    private fun barTop(i: android.view.WindowInsets) =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) i.getInsets(android.view.WindowInsets.Type.systemBars()).top else i.systemWindowInsetTop
+
+    @Suppress("DEPRECATION")
+    private fun barBottom(i: android.view.WindowInsets) =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) i.getInsets(android.view.WindowInsets.Type.systemBars()).bottom else i.systemWindowInsetBottom
+
+    private val compatListener: () -> Unit ={ runOnUiThread { if (!isFinishing) build() } }
 
     override fun onResume() {
         super.onResume()
         build()
         Diag.listen(statusListener)
+        Compat.listen(compatListener)
         if (hasBluetooth()) StinePodsService.start(this, StinePodsService.ACTION_RELOAD)
     }
 
     override fun onPause() {
         Diag.unlisten(statusListener)
+        Compat.unlisten(compatListener)
         super.onPause()
     }
 
@@ -85,6 +101,7 @@ class MainActivity : Activity() {
 
         setupCard()
         if (!hasBluetooth()) return
+        compatCard()
 
         val bonded = getSystemService(BluetoothManager::class.java).adapter?.bondedDevices.orEmpty()
             .map { Triple(it.address, it.name ?: it.address, it.bluetoothClass?.majorDeviceClass == BluetoothClass.Device.Major.AUDIO_VIDEO) }
@@ -148,7 +165,9 @@ class MainActivity : Activity() {
     private fun setupCard() {
         val nm = getSystemService(NotificationManager::class.java)
         val items = buildList {
-            add(Triple("Bluetooth access", hasBluetooth()) { requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_CONNECT), 1) })
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) add(Triple("Bluetooth access", hasBluetooth()) {
+                requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_CONNECT), 1)
+            })
             if (Build.VERSION.SDK_INT >= 33) add(Triple("Notifications for prompts and pairing",
                 checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
                 requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 2)
@@ -165,19 +184,44 @@ class MainActivity : Activity() {
             card { add(TextView(this).apply { text = "✓  All set up"; textSize = 14f; setTextColor(accent) }, 0) }
             return
         }
+        val mediaOk = nm.isNotificationListenerAccessGranted(ComponentName(this, MediaAccess::class.java))
         card("Finish setting up") {
-            for ((label, ok, fix) in items) {
-                val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-                row.addView(TextView(this).apply {
-                    text = if (ok) "✓" else "!"; gravity = Gravity.CENTER; textSize = 13f; setTextColor(Color.WHITE)
-                    background = circle(if (ok) accent else Color.rgb(230, 126, 34))
-                }, LinearLayout.LayoutParams(dp(24), dp(24)).apply { marginEnd = dp(12) })
-                row.addView(TextView(this).apply { text = label; textSize = 14f; setTextColor(textMain) },
-                    LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-                if (!ok) row.addView(button("Fix", fix))
-                add(row, 10)
+            for ((label, ok, fix) in items) statusRow(if (ok) "✓" else "!", if (ok) accent else warn, label, if (ok) null else ("Fix" to fix))
+            if (!mediaOk && Compat.restrictedSettingsLikely) {
+                hint("If Android says Media access is a \"restricted setting\": open App info, tap ⋮ (top right) → Allow restricted settings, then come back and tap Fix again.")
+                add(button("Open App info") { startActivity(Compat.appDetails(this)) }, 8)
             }
         }
+    }
+
+    /** What this phone's Bluetooth lets StinePods do, from real attempts (see Compat). */
+    private fun compatCard() {
+        card("Phone compatibility") {
+            hint("Android ${Build.VERSION.RELEASE} · ${Build.MANUFACTURER} ${Build.MODEL}")
+            for (c in Compat.Capability.entries) {
+                val s = Compat.state(c)
+                val (mark, color, note) = when (s) {
+                    Compat.State.OK -> Triple("✓", accent, "")
+                    Compat.State.UNKNOWN -> Triple("•", textDim, " (checked on first switch)")
+                    Compat.State.BLOCKED -> Triple("✕", if (c.essential) warn else textDim, if (c.essential) " — blocked on this phone" else " — not available (optional)")
+                }
+                statusRow(mark, color, c.label + note, null)
+            }
+            if (Compat.degraded) hint("This phone's Bluetooth refuses part of the automatic switching. Switching from the PC still works; to move the headphones to the PC, disconnect them from this phone's Bluetooth settings.")
+        }
+    }
+
+    private val warn = Color.rgb(230, 126, 34)
+
+    private fun statusRow(mark: String, color: Int, label: String, action: Pair<String, () -> Unit>?) {
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        row.addView(TextView(this).apply {
+            text = mark; gravity = Gravity.CENTER; textSize = 13f; setTextColor(Color.WHITE); background = circle(color)
+        }, LinearLayout.LayoutParams(dp(24), dp(24)).apply { marginEnd = dp(12) })
+        row.addView(TextView(this).apply { text = label; textSize = 14f; setTextColor(textMain) },
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        if (action != null) row.addView(button(action.first, action.second))
+        add(row, 10)
     }
 
     private fun showStatus(s: String) {
@@ -188,7 +232,7 @@ class MainActivity : Activity() {
 
     private fun changed() = StinePodsService.start(this, StinePodsService.ACTION_RELOAD)
 
-    private fun hasBluetooth() = checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
+    private fun hasBluetooth() = Compat.hasBluetoothPermission(this)
 
     private fun ruleLabel(r: AppRule) = when (r) {
         AppRule.AUTO -> "Switch automatically"

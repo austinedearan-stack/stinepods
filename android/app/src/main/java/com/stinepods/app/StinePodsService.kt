@@ -85,6 +85,7 @@ class StinePodsService : Service() {
     }
 
     private fun setUp() {
+        Compat.init()
         prefs = Prefs(this)
         vault = KeyVault(this)
         audio = getSystemService(AudioManager::class.java)
@@ -97,8 +98,11 @@ class StinePodsService : Service() {
             onLikelyStart = ::ping,
         )
         media.start()
-        // Calls (cellular or VoIP) show up as an audio mode change; no phone-state permission needed.
-        audio.addOnModeChangedListener({ r -> handler.post(r) }) { onAudioMode() }
+        // Calls (cellular or VoIP) show up as an audio mode change; no phone-state permission needed. Android 12+
+        // reports mode changes; before that the mode is checked whenever it matters (see onData).
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            audio.addOnModeChangedListener({ r -> handler.post(r) }) { onAudioMode() }
+        }
         link = LinkClient(
             onConnected = { c -> handler.post { onConnected(c) } },
             onData = { c, buf, n -> val copy = buf.copyOf(n); handler.post { onData(c, copy) } },
@@ -286,7 +290,10 @@ class StinePodsService : Service() {
                 feed(Event.PeerLink(true))
                 updateKeepAlive()
             }
-            is LinkEvent.Incoming -> feed(Event.Received(e.m))
+            is LinkEvent.Incoming -> {
+                if (e.m.t == "claim") onAudioMode()   // Android 10-11: refresh call state before deciding
+                feed(Event.Received(e.m))
+            }
             is LinkEvent.Failed -> {
                 Diag.warn("link: ${e.reason}")
                 notifications.cancel(N_PAIR)

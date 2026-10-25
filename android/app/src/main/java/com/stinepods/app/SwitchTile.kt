@@ -10,7 +10,7 @@ class SwitchTile : TileService() {
     override fun onClick() {
         val prefs = Prefs(this)
         prefs.enabled = !prefs.enabled
-        StinePodsService.start(this, StinePodsService.ACTION_RELOAD)
+        Compat.startService(this, StinePodsService.ACTION_RELOAD)
         render()
     }
 

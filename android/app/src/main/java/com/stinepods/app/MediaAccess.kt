@@ -9,6 +9,6 @@ import android.service.notification.NotificationListenerService
 class MediaAccess : NotificationListenerService() {
     override fun onListenerConnected() {
         // Access was just granted (or the system rebound us): let the service start watching media.
-        StinePodsService.start(this, StinePodsService.ACTION_RELOAD)
+        Compat.startService(this, StinePodsService.ACTION_RELOAD)
     }
 }

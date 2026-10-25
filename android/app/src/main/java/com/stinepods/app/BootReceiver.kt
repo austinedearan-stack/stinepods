@@ -8,6 +8,6 @@ import android.content.Intent
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != Intent.ACTION_BOOT_COMPLETED && intent.action != Intent.ACTION_MY_PACKAGE_REPLACED) return
-        if (Prefs(context).pc != null) StinePodsService.start(context)
+        if (Prefs(context).pc != null) Compat.startService(context)
     }
 }

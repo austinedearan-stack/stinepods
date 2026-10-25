@@ -13,11 +13,12 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.Handler
+import com.stinepods.app.Compat
 import com.stinepods.app.Diag
 
 /**
- * The headset's A2DP + HFP profiles (docs/spikes/S1-android-connect.md). Connect/disconnect use the hidden profile
- * methods by reflection, which a normal app may call on Android 12. A headset counts as *here* while A2DP is connected
+ * The headset's A2DP + HFP profiles (docs/spikes/S1-android-connect.md). Connect/disconnect use hidden profile
+ * methods by reflection (see [Compat] for what each Android version allows). A headset counts as *here* while A2DP is connected
  * and as *away* once its whole Bluetooth link is down, because only then can the PC connect to a single-point headset.
  * All callbacks arrive on [handler]'s thread.
  */
@@ -69,15 +70,20 @@ class Profiles(
      */
     fun take(h: String): Boolean {
         val d = device(h)
-        val a2 = call(a2dp, "connect", d)
-        Diag.info("bt: take $h a2dp=$a2 hfp=${call(hfp, "connect", d)}")
+        val a2 = call(a2dp, "connect", d, Compat.Capability.MUSIC_CONNECT)
+        // Calls are optional: on newer Android this needs a system-only permission, and most headsets
+        // bring up the call profile themselves once music is connected.
+        val hf = call(hfp, "connect", d, Compat.Capability.CALL_CONNECT)
+        Diag.info("bt: take $h a2dp=$a2 hfp=$hf")
         return a2 == true
     }
 
     /** Drops both profiles so the Bluetooth link goes down; completion arrives as onLink(here = false). */
     fun release(h: String) {
         val d = device(h)
-        Diag.info("bt: release $h hfp=${call(hfp, "disconnect", d)} a2dp=${call(a2dp, "disconnect", d)}")
+        val hf = call(hfp, "disconnect", d, Compat.Capability.CALL_RELEASE)
+        val a2 = call(a2dp, "disconnect", d, Compat.Capability.MUSIC_RELEASE)
+        Diag.info("bt: release $h hfp=$hf a2dp=$a2")
     }
 
     /** Paired devices for the settings screen: (address, name, looks like audio). */
@@ -88,13 +94,19 @@ class Profiles(
 
     fun device(address: String): BluetoothDevice = adapter!!.getRemoteDevice(address)
 
-    private fun call(proxy: BluetoothProfile?, name: String, d: BluetoothDevice): Any? = try {
-        val p = proxy ?: error("profile not ready")
-        p.javaClass.getMethod(name, BluetoothDevice::class.java).invoke(p, d)
-    } catch (e: Exception) {
-        // InvocationTargetException wraps the real failure (e.g. SecurityException on stricter Android versions).
-        Diag.warn("bt: $name failed: ${e.cause ?: e}")
-        false
+    private fun call(proxy: BluetoothProfile?, name: String, d: BluetoothDevice, capability: Compat.Capability): Any? {
+        val p = proxy ?: return false.also { Diag.warn("bt: $name: profile not ready") }
+        return try {
+            val result = p.javaClass.getMethod(name, BluetoothDevice::class.java).invoke(p, d)
+            Compat.record(capability, true)
+            result
+        } catch (e: Exception) {
+            // InvocationTargetException wraps the real failure (e.g. SecurityException on a stricter Android/OEM).
+            val cause = e.cause ?: e
+            Diag.warn("bt: $name failed: $cause")
+            if (cause is SecurityException || e is NoSuchMethodException || e is IllegalAccessException) Compat.record(capability, false)
+            false
+        }
     }
 
     /** Re-reads current states (start-up, Bluetooth toggled, watch list changed). */
