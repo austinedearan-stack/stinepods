@@ -10,7 +10,7 @@ namespace StinePods.Windows;
 internal sealed unsafe class Tray
 {
     const uint CallbackMsg = Win32.WmApp + 1, InvokeMsg = Win32.WmApp + 2;
-    const int CmdToggle = 1, CmdOpenLog = 2, CmdExit = 3;
+    const int CmdToggle = 1, CmdOpenLog = 2, CmdExit = 3, CmdStartup = 4, CmdOtherAsk = 10, CmdOtherAuto = 11, CmdOtherIgnore = 12;
 
     static Tray? instance;
 
@@ -22,7 +22,11 @@ internal sealed unsafe class Tray
     System.Action? balloonClick;
 
     public bool Enabled { get; set; } = true;
-    public event System.Action? ToggleRequested, ExitRequested;
+    public bool StartWithWindows { get; set; }
+    /// <summary>Rule for apps without media controls: "ask", "auto" or "ignore".</summary>
+    public string OtherRule { get; set; } = "ask";
+    public event System.Action? ToggleRequested, ExitRequested, StartupToggled;
+    public event Action<string>? OtherRuleChosen;
 
     public Tray() => instance = this;
 
@@ -112,6 +116,13 @@ internal sealed unsafe class Tray
         Win32.AppendMenu(m, Win32.MfString | Win32.MfGrayed, 0, status);
         Win32.AppendMenu(m, Win32.MfSeparator, 0, null);
         Win32.AppendMenu(m, Win32.MfString | (Enabled ? Win32.MfChecked : 0), CmdToggle, "Automatic switching");
+        Win32.AppendMenu(m, Win32.MfSeparator, 0, null);
+        Win32.AppendMenu(m, Win32.MfString | Win32.MfGrayed, 0, "Apps without media controls (VLC, games…):");
+        Win32.AppendMenu(m, Win32.MfString | (OtherRule == "ask" ? Win32.MfChecked : 0), CmdOtherAsk, "    Ask me first");
+        Win32.AppendMenu(m, Win32.MfString | (OtherRule == "auto" ? Win32.MfChecked : 0), CmdOtherAuto, "    Switch automatically");
+        Win32.AppendMenu(m, Win32.MfString | (OtherRule == "ignore" ? Win32.MfChecked : 0), CmdOtherIgnore, "    Never switch");
+        Win32.AppendMenu(m, Win32.MfSeparator, 0, null);
+        Win32.AppendMenu(m, Win32.MfString | (StartWithWindows ? Win32.MfChecked : 0), CmdStartup, "Start with Windows");
         Win32.AppendMenu(m, Win32.MfString, CmdOpenLog, "Open log");
         Win32.AppendMenu(m, Win32.MfString, CmdExit, "Exit StinePods");
         Win32.GetCursorPos(out var pt);
@@ -121,6 +132,10 @@ internal sealed unsafe class Tray
         switch (cmd)
         {
             case CmdToggle: ToggleRequested?.Invoke(); break;
+            case CmdStartup: StartupToggled?.Invoke(); break;
+            case CmdOtherAsk: OtherRuleChosen?.Invoke("ask"); break;
+            case CmdOtherAuto: OtherRuleChosen?.Invoke("auto"); break;
+            case CmdOtherIgnore: OtherRuleChosen?.Invoke("ignore"); break;
             case CmdOpenLog: System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Log.Path) { UseShellExecute = true }); break;
             case CmdExit: ExitRequested?.Invoke(); break;
         }

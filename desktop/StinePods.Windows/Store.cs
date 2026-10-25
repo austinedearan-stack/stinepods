@@ -26,6 +26,8 @@ internal sealed class Store : IKeyStore
     readonly Dictionary<string, byte[]> keys;
 
     public string DeviceId { get; }
+    /// <summary>No settings existed before this run (fresh install).</summary>
+    public bool FirstRun { get; } = !File.Exists(SettingsPath);
     public bool Enabled { get; set; } = true;
     public Settings Settings { get; } = new() { Role = Role.Pc };
 

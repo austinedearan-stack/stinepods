@@ -177,16 +177,70 @@ settings role=pc headsets=HS
 < pause brave.exe
 < release HS
 < timer release 4000
+> stop brave.exe
 > headset HS away
 < send state HS away
 < cancel release
 < send released HS 1 claim
 > wait 500
 > play brave.exe
+< timer retry 2500
 > wait 3000
 > stop brave.exe
+< cancel retry
 > play brave.exe
 < pause brave.exe
+< send claim HS 1
+< timer claim 2500
+end
+
+scenario a play during the cooldown is acted on once it ends, if still playing
+settings role=pc headsets=HS
+> headset HS here
+> play brave.exe
+> peer up
+> recv claim HS 1
+< pause brave.exe
+< release HS
+< timer release 4000
+> stop brave.exe
+> headset HS away
+< send state HS away
+< cancel release
+< send released HS 1 claim
+> wait 500
+> play brave.exe
+< timer retry 2500
+> wait 2500
+> timer retry
+< pause brave.exe
+< send claim HS 1
+< timer claim 2500
+end
+
+scenario a play while giving the headset away claims it back afterwards
+settings role=phone headsets=HS
+> headset HS here
+> peer up
+< send config HS prefer=phone return=stay
+< send state HS here
+> play spotify
+> recv claim HS 1
+< pause spotify
+< release HS
+< timer release 4000
+> stop spotify
+> play spotify
+< timer retry 500
+> headset HS away
+< send state HS away
+< cancel release
+< send released HS 1 claim
+> timer retry
+< timer retry 3000
+> wait 3000
+> timer retry
+< pause spotify
 < send claim HS 1
 < timer claim 2500
 end

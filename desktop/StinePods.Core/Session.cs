@@ -265,6 +265,7 @@ public sealed class Session(Role role, string myId, string myName, IKeyStore key
         if (m.Id is { } id) w.WriteNumber("id", id);
         if (m.Why is not null) w.WriteString("why", m.Why);
         if (m.Here is { } here) w.WriteBoolean("here", here);
+        if (m.Text is not null) w.WriteString("text", m.Text);
         if (m.Headsets is { } hs)
         {
             w.WriteStartArray("headsets");
@@ -285,6 +286,7 @@ public sealed class Session(Role role, string myId, string myName, IKeyStore key
             Str("why"))
         {
             Here = j.TryGetProperty("here", out var hr) && hr.ValueKind is JsonValueKind.True or JsonValueKind.False ? hr.GetBoolean() : null,
+            Text = Str("text"),
             Headsets = j.TryGetProperty("headsets", out var hs) && hs.ValueKind == JsonValueKind.Array
                 ? [.. hs.EnumerateArray().Select(x => x.GetString() ?? "")] : null,
             Prefer = Str("prefer") is { } p && Enum.TryParse<Prefer>(p, true, out var pv) ? pv : null,

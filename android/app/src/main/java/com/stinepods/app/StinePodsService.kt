@@ -289,6 +289,7 @@ class StinePodsService : Service() {
                 Diag.info("link: ready with ${e.peerName}")
                 feed(Event.PeerLink(true))
                 updateKeepAlive()
+                startLogForwarding(c, s)
             }
             is LinkEvent.Incoming -> {
                 if (e.m.t == "claim") onAudioMode()   // Android 10-11: refresh call state before deciding
@@ -302,8 +303,21 @@ class StinePodsService : Service() {
         }
     }
 
+    /**
+     * Sends this phone's diagnostic log to the PC (which writes it to its own log), so phones without a USB debugging
+     * connection can still be diagnosed. Recent history first, then live lines.
+     */
+    private fun startLogForwarding(c: LinkClient.Connection, s: Session) {
+        val send: (String) -> Unit = { line ->
+            handler.post { if (s == session && c == conn && s.ready) c.send(s.send(Msg("log", text = line))) }
+        }
+        Diag.recent(80).forEach(send)
+        Diag.sink = send
+    }
+
     private fun onClosed(c: LinkClient.Connection) {
         if (c != conn) return
+        Diag.sink = null
         val wasReady = session?.ready == true
         conn = null
         session = null

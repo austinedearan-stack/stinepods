@@ -45,7 +45,9 @@ compatibility); unknown fields are ignored.
 | `claim` | `h:addr`, `id:int` | both | "I want this headset" (new playback started here) |
 | `released` | `h:addr`, `id:int?`, `why:"claim"\|"prefer"\|"return"` | both | "the headset's link to me is down; take it" |
 | `deny` | `h:addr`, `id:int`, `why:"call"` | phone | claim refused (e.g. phone call in progress) |
-| `ping` / `pong` | — | both | liveness, at most once per 60 s of silence |
+| `state` | `h:addr`, `here:bool` | both | whether the headset is connected to the sender (some headsets hold two connections) |
+| `log` | `text` | phone | one diagnostic line, written to the PC's local log (for phones without USB debugging) |
+| `ping` / `pong` | — | both | keep-alive while media plays (every 4 s; the link sleeps after ~5 s idle) and wake-up |
 
 ## Hand-off sequence (phone takes the headset from the PC)
 

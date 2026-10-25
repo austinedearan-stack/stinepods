@@ -22,6 +22,8 @@ public sealed record Msg(string T, string? H = null, int? Id = null, string? Why
 {
     /// <summary>`state`: whether the headset is connected to the sender.</summary>
     public bool? Here { get; init; }
+    /// <summary>`log`: one diagnostic line (phone → PC).</summary>
+    public string? Text { get; init; }
     public List<string>? Headsets { get; init; }
     public Prefer? Prefer { get; init; }
     public ReturnOnStop? ReturnOnStop { get; init; }
@@ -56,7 +58,7 @@ public sealed record Notify(string Text) : Action;
 public sealed class Engine(Settings settings)
 {
     public const int ClaimTimeoutMs = 2500, TakeTimeoutMs = 8000, ReleaseTimeoutMs = 4000;
-    public const int AskTimeoutMs = 15000, ReturnDelayMs = 10000, CooldownMs = 3000, ExpectWindowMs = 3000;
+    public const int AskTimeoutMs = 15000, ReturnDelayMs = 10000, CooldownMs = 3000, ExpectWindowMs = 3000, RetryMs = 500;
 
     enum Phase { AskWait, AwaitRelease, AwaitConnect }
 
@@ -79,6 +81,7 @@ public sealed class Engine(Settings settings)
     readonly HashSet<string> playing = [];
     readonly Dictionary<string, (bool Playing, long Until)> expect = [];
     bool peerUp, callActive, returnArmed;
+    string? deferred;   // app whose play arrived mid-switch / in cooldown; re-checked by the "retry" timer
     Switch? pending;
     Releasing? releasing;
     (string App, string H)? pausedForPeer;
@@ -134,14 +137,34 @@ public sealed class Engine(Settings settings)
     void OnPlay(string app, long now, List<Action> a)
     {
         if (Expected(app, true, now)) return;
+        // We just paused this app and are waiting for its pause to show up: a "playing" report now is a late
+        // report from before our pause (detection can lag), not a new play. Acting on it would claim the headset
+        // back on its own.
+        if (expect.TryGetValue(app, out var x) && !x.Playing && now <= x.Until) return;
         playing.Add(app);
         DisarmReturn(a);
+        Decide(app, now, a);
+    }
+
+    /// <summary>Should this app's playback move the headset here? (Also re-run for a deferred play.)</summary>
+    void Decide(string app, long now, List<Action> a)
+    {
         var h = Headset;
+        if (h is null) return;
         // Already connected here does nothing, unless the peer holds a second connection to the same headset:
         // then its stream may be the one being heard, so ask it to let go.
-        if (h is null || (here.Contains(h) && !peerHas.Contains(h)) || pending is not null || now < cooldownUntil) return;
+        if (pending is null && releasing is null && here.Contains(h) && !peerHas.Contains(h)) return;
         var rule = Settings.RuleFor(app);
         if (rule == AppRule.Ignore) return;
+        // Mid-switch or just after one: don't act now (that is where echoes and ping-pong come from), but don't
+        // drop the user's play either. Look again once things have settled, if the app is still playing.
+        if (pending is not null || releasing is not null || now < cooldownUntil)
+        {
+            deferred = app;
+            a.Add(new StartTimer("retry", (int)Math.Max(cooldownUntil - now, RetryMs)));
+            return;
+        }
+        deferred = null;
 
         // Pause straight away so nothing is missed while the headset moves; resumed once it's connected here.
         PauseApp(app, now, a);
@@ -159,6 +182,11 @@ public sealed class Engine(Settings settings)
     {
         if (Expected(app, false, now)) return;
         playing.Remove(app);
+        if (deferred == app)
+        {
+            deferred = null;
+            a.Add(new CancelTimer("retry"));
+        }
         if (Settings.ReturnOnStop == ReturnOnStop.Return && playing.Count == 0 && peerUp
             && takenFrom is { } h && here.Contains(h) && pending is null)
         {
@@ -357,6 +385,10 @@ public sealed class Engine(Settings settings)
             case "release" when releasing is { } r:
                 if (peerUp) a.Add(new Send(new Msg("released", r.H, r.Id, r.Why)));
                 releasing = null;
+                break;
+            case "retry":
+                if (deferred is { } d && playing.Contains(d)) Decide(d, now, a);
+                else deferred = null;
                 break;
             case "return":
                 returnArmed = false;

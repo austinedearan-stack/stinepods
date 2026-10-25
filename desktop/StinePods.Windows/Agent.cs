@@ -36,6 +36,22 @@ internal sealed class Agent(Store store, Tray tray)
         tray.Enabled = store.Enabled;
         tray.ToggleRequested += () => Post(Toggle);
         tray.ExitRequested += () => Post(Exit);
+        tray.OtherRule = Describe.Name<AppRule>(store.Settings.RuleFor(Other));
+        tray.OtherRuleChosen += rule => Post(() =>
+        {
+            store.Settings.Apps[Other] = Enum.Parse<AppRule>(rule, ignoreCase: true);
+            tray.OtherRule = rule;
+            store.Save();
+        });
+        // First run turns start-up on; afterwards it follows the tray toggle. Re-applied each start so the entry
+        // always points at the current exe location.
+        if (store.FirstRun || Startup.IsEnabled()) Startup.Set(true);
+        tray.StartWithWindows = Startup.IsEnabled();
+        tray.StartupToggled += () => Post(() =>
+        {
+            Startup.Set(!Startup.IsEnabled());
+            tray.StartWithWindows = Startup.IsEnabled();
+        });
 
         audio.Run(() => headsets = new HeadsetAudio(
             (h, here) => Post(() => Feed(new HeadsetLink(h, here))),
@@ -48,6 +64,8 @@ internal sealed class Agent(Store store, Tray tray)
             onLikelyStart: () => Post(Ping)).GetAwaiter().GetResult();
         StartServer();
         UpdateStatus();
+        if (store.FirstRun)
+            tray.Balloon("StinePods is running", "Open StinePods on your phone and choose this PC. Both screens will show a code to confirm.");
         Log.Info($"agent: started (id {store.DeviceId}, headsets [{string.Join(", ", store.Settings.Headsets)}])");
 
         foreach (var work in loop.GetConsumingEnumerable())
@@ -265,6 +283,9 @@ internal sealed class Agent(Store store, Tray tray)
                     break;
                 case LinkRtt rtt:
                     if (rtt.Ms > 300) Log.Info($"link: slow round trip {rtt.Ms} ms (link was asleep)");
+                    break;
+                case Incoming { M.T: "log" } m:
+                    Log.Info($"phone: {m.M.Text}");
                     break;
                 case Incoming m:
                     Feed(new Received(m.M));

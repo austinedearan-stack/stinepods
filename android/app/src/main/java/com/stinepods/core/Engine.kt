@@ -26,6 +26,8 @@ data class Msg(
     val why: String? = null,
     /** `state`: whether the headset is connected to the sender. */
     val here: Boolean? = null,
+    /** `log`: one diagnostic line (phone → PC). */
+    val text: String? = null,
     val headsets: List<String>? = null,
     val prefer: Prefer? = null,
     val returnOnStop: ReturnOnStop? = null,
@@ -68,6 +70,7 @@ class Engine(val settings: Settings) {
         const val RETURN_DELAY_MS = 10000
         const val COOLDOWN_MS = 3000
         const val EXPECT_WINDOW_MS = 3000
+        const val RETRY_MS = 500
     }
 
     private enum class Phase { ASK_WAIT, AWAIT_RELEASE, AWAIT_CONNECT }
@@ -91,6 +94,7 @@ class Engine(val settings: Settings) {
     private var peerUp = false
     private var callActive = false
     private var returnArmed = false
+    private var deferred: String? = null   // app whose play arrived mid-switch / in cooldown; re-checked by "retry"
     private var pending: Switch? = null
     private var releasing: Releasing? = null
     private var pausedForPeer: Pair<String, String>? = null   // (app, headset)
@@ -140,14 +144,32 @@ class Engine(val settings: Settings) {
 
     private fun onPlay(app: String, now: Long, a: MutableList<Action>) {
         if (expected(app, true, now)) return
+        // We just paused this app and are waiting for its pause to show up: a "playing" report now is a late
+        // report from before our pause (detection can lag), not a new play. Acting on it would claim the headset
+        // back on its own.
+        val x = expect[app]
+        if (x != null && !x.playing && now <= x.until) return
         playing += app
         disarmReturn(a)
+        decide(app, now, a)
+    }
+
+    /** Should this app's playback move the headset here? (Also re-run for a deferred play.) */
+    private fun decide(app: String, now: Long, a: MutableList<Action>) {
         val h = headset ?: return
         // Already connected here does nothing, unless the peer holds a second connection to the same headset:
         // then its stream may be the one being heard, so ask it to let go.
-        if ((h in here && h !in peerHas) || pending != null || now < cooldownUntil) return
+        if (pending == null && releasing == null && h in here && h !in peerHas) return
         val rule = settings.ruleFor(app)
         if (rule == AppRule.IGNORE) return
+        // Mid-switch or just after one: don't act now (that is where echoes and ping-pong come from), but don't
+        // drop the user's play either. Look again once things have settled, if the app is still playing.
+        if (pending != null || releasing != null || now < cooldownUntil) {
+            deferred = app
+            a += Action.StartTimer("retry", maxOf(cooldownUntil - now, RETRY_MS.toLong()).toInt())
+            return
+        }
+        deferred = null
 
         // Pause straight away so nothing is missed while the headset moves; resumed once it's connected here.
         pauseApp(app, now, a)
@@ -164,6 +186,10 @@ class Engine(val settings: Settings) {
     private fun onStop(app: String, now: Long, a: MutableList<Action>) {
         if (expected(app, false, now)) return
         playing -= app
+        if (deferred == app) {
+            deferred = null
+            a += Action.CancelTimer("retry")
+        }
         val h = takenFrom
         if (settings.returnOnStop == ReturnOnStop.RETURN && playing.isEmpty() && peerUp &&
             h != null && h in here && pending == null
@@ -350,6 +376,10 @@ class Engine(val settings: Settings) {
             "release" -> releasing?.let { r ->
                 if (peerUp) a += Action.Send(Msg("released", r.h, r.id, r.why))
                 releasing = null
+            }
+            "retry" -> {
+                val d = deferred
+                if (d != null && d in playing) decide(d, now, a) else deferred = null
             }
             "return" -> {
                 returnArmed = false

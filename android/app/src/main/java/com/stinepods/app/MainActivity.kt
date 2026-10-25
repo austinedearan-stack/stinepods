@@ -208,6 +208,10 @@ class MainActivity : Activity() {
                 statusRow(mark, color, c.label + note, null)
             }
             if (Compat.degraded) hint("This phone's Bluetooth refuses part of the automatic switching. Switching from the PC still works; to move the headphones to the PC, disconnect them from this phone's Bluetooth settings.")
+            add(button("Share diagnostic log") {
+                val text = "StinePods log · Android ${Build.VERSION.RELEASE} · ${Build.MANUFACTURER} ${Build.MODEL}\n" + Diag.recent().joinToString("\n")
+                startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text), "Share StinePods log"))
+            }, 14)
         }
     }
 

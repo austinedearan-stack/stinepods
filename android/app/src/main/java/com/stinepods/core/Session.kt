@@ -47,6 +47,7 @@ class Session(
             m.id?.let { put("id", it) }
             m.why?.let { put("why", it) }
             m.here?.let { put("here", it) }
+            m.text?.let { put("text", it) }
             m.headsets?.let { put("headsets", JSONArray(it)) }
             m.prefer?.let { put("prefer", Describe.name(it)) }
             m.returnOnStop?.let { put("returnOnStop", Describe.name(it)) }
@@ -60,6 +61,7 @@ class Session(
                 id = if (j.has("id") && j.get("id") is Number) j.getInt("id") else null,
                 why = str("why"),
                 here = if (j.has("here") && j.get("here") is Boolean) j.getBoolean("here") else null,
+                text = str("text"),
                 headsets = j.optJSONArray("headsets")?.let { arr -> List(arr.length()) { arr.getString(it) } },
                 prefer = str("prefer")?.let { p -> Prefer.entries.firstOrNull { it.name.equals(p, true) } },
                 returnOnStop = str("returnOnStop")?.let { r -> ReturnOnStop.entries.firstOrNull { it.name.equals(r, true) } },

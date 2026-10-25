@@ -27,3 +27,6 @@ Thumbs.db
 *.pem
 *.key
 .env
+
+# Build output for distribution
+dist/
