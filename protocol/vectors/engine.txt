@@ -1,0 +1,499 @@
+# Executable specification of the hand-off coordinator, shared by the C# and Kotlin test suites.
+#
+#   scenario <name>              starts a scenario with a fresh engine
+#   settings k=v ...             role=phone|pc headsets=A,B prefer=phone|pc|none return=stay|return calls=on|off apps=id:auto|ask|ignore,...
+#   > <event>                    feed an event; the "<" lines after it are the exact actions expected, in order
+#   < <action>                   (an event with no "<" lines must produce no actions)
+#   > wait <ms>                  advance the clock (not an event)
+#   end
+#
+# events:  peer up|down · headset <h> here|away · play <app> · stop <app> · answer <id> yes|no · timer <name> · call on|off
+#          recv claim <h> <id> · recv released <h> <id|-> <why> · recv deny <h> <id> <why> · recv config <hs> prefer=<p> return=<r>
+#          recv state <h> here|away
+# actions: pause|resume <app> · release|take <h> · send <msg> · ask <id> <app> · timer <name> <ms> · cancel <name> · notify <text>
+#
+# Each side tells the other whether a headset is connected to it (`state`): the phone when the link comes up, the PC
+# once it has the phone's config, and both whenever the headset's link to them changes. Some headsets can hold two
+# connections at once; then "here" alone doesn't mean the sound comes from here.
+
+scenario phone takes the headset from the PC
+settings role=phone headsets=HS
+> peer up
+< send config HS prefer=phone return=stay
+< send state HS away
+> play spotify
+< pause spotify
+< send claim HS 1
+< timer claim 2500
+> stop spotify
+> recv released HS 1 claim
+< cancel claim
+< take HS
+< timer take 8000
+> headset HS here
+< send state HS here
+< cancel take
+< resume spotify
+> play spotify
+end
+
+scenario PC gives the headset up when the phone claims it
+settings role=pc headsets=HS
+> headset HS here
+> play brave.exe
+> peer up
+> recv claim HS 1
+< pause brave.exe
+< release HS
+< timer release 4000
+> stop brave.exe
+> headset HS away
+< send state HS away
+< cancel release
+< send released HS 1 claim
+end
+
+scenario claimer takes the headset on its own when the peer doesn't answer
+settings role=phone headsets=HS
+> peer up
+< send config HS prefer=phone return=stay
+< send state HS away
+> play spotify
+< pause spotify
+< send claim HS 1
+< timer claim 2500
+> wait 2500
+> timer claim
+< take HS
+< timer take 8000
+> headset HS here
+< send state HS here
+< cancel take
+< resume spotify
+end
+
+scenario without a peer link the switch is stand-alone
+settings role=phone headsets=HS
+> play spotify
+< pause spotify
+< take HS
+< timer take 8000
+> headset HS here
+< cancel take
+< resume spotify
+end
+
+scenario peer link drops while waiting for the release
+settings role=phone headsets=HS
+> peer up
+< send config HS prefer=phone return=stay
+< send state HS away
+> play spotify
+< pause spotify
+< send claim HS 1
+< timer claim 2500
+> peer down
+< cancel claim
+< take HS
+< timer take 8000
+end
+
+scenario headset never connects: playback resumes where it was
+settings role=phone headsets=HS
+> play spotify
+< pause spotify
+< take HS
+< timer take 8000
+> wait 8000
+> timer take
+< notify Couldn't connect the headset
+< resume spotify
+> play spotify
+end
+
+scenario playing where the headset already is does nothing
+settings role=pc headsets=HS
+> headset HS here
+> play brave.exe
+end
+
+scenario ask rule, user says yes
+settings role=pc headsets=HS apps=brave.exe:ask
+> peer up
+> play brave.exe
+< pause brave.exe
+< ask 1 brave.exe
+< timer ask 15000
+> answer 1 yes
+< cancel ask
+< send claim HS 1
+< timer claim 2500
+end
+
+scenario ask rule, user says no and playback resumes locally
+settings role=pc headsets=HS apps=brave.exe:ask
+> peer up
+> play brave.exe
+< pause brave.exe
+< ask 1 brave.exe
+< timer ask 15000
+> stop brave.exe
+> answer 1 no
+< cancel ask
+< resume brave.exe
+> play brave.exe
+end
+
+scenario ask rule, no answer counts as no
+settings role=phone headsets=HS apps=com.google.android.youtube:ask
+> play com.google.android.youtube
+< pause com.google.android.youtube
+< ask 1 com.google.android.youtube
+< timer ask 15000
+> wait 15000
+> timer ask
+< resume com.google.android.youtube
+end
+
+scenario ignored apps never move the headset
+settings role=phone headsets=HS apps=com.game:ignore
+> peer up
+< send config HS prefer=phone return=stay
+< send state HS away
+> play com.game
+end
+
+scenario no headset configured does nothing
+settings role=phone
+> play spotify
+end
+
+scenario PC does not claim back right after giving the headset away
+settings role=pc headsets=HS
+> headset HS here
+> play brave.exe
+> peer up
+> recv claim HS 1
+< pause brave.exe
+< release HS
+< timer release 4000
+> headset HS away
+< send state HS away
+< cancel release
+< send released HS 1 claim
+> wait 500
+> play brave.exe
+> wait 3000
+> stop brave.exe
+> play brave.exe
+< pause brave.exe
+< send claim HS 1
+< timer claim 2500
+end
+
+scenario phone refuses a claim during a call
+settings role=phone headsets=HS
+> headset HS here
+> peer up
+< send config HS prefer=phone return=stay
+< send state HS here
+> call on
+> recv claim HS 1
+< send deny HS 1 call
+end
+
+scenario claimer is told the phone is on a call
+settings role=pc headsets=HS
+> peer up
+> play brave.exe
+< pause brave.exe
+< send claim HS 1
+< timer claim 2500
+> recv deny HS 1 call
+< cancel claim
+< notify Headset is busy: phone call in progress
+end
+
+scenario calls pull the headset to the phone when enabled
+settings role=phone headsets=HS calls=on
+> peer up
+< send config HS prefer=phone return=stay
+< send state HS away
+> call on
+< send claim HS 1
+< timer claim 2500
+> recv released HS 1 claim
+< cancel claim
+< take HS
+< timer take 8000
+end
+
+scenario calls do not pull the headset by default
+settings role=phone headsets=HS
+> peer up
+< send config HS prefer=phone return=stay
+< send state HS away
+> call on
+end
+
+scenario PC hands a headset it picked up by itself to the preferred phone
+settings role=pc headsets=HS
+> peer up
+> headset HS here
+< send state HS here
+< release HS
+< timer release 4000
+> headset HS away
+< send state HS away
+< cancel release
+< send released HS - prefer
+end
+
+scenario PC keeps a headset it picked up when the PC is preferred
+settings role=pc headsets=HS prefer=pc
+> peer up
+> headset HS here
+< send state HS here
+end
+
+scenario phone takes a headset the PC offers it
+settings role=phone headsets=HS
+> peer up
+< send config HS prefer=phone return=stay
+< send state HS away
+> recv released HS - prefer
+< take HS
+< timer take 8000
+> headset HS here
+< send state HS here
+< cancel take
+end
+
+scenario PC applies the phone's config and reports its headsets
+settings role=pc
+> peer up
+> recv config HS prefer=pc return=stay
+< send state HS away
+> headset HS here
+< send state HS here
+end
+
+scenario return on stop hands the headset back (phone side)
+settings role=phone headsets=HS return=return
+> peer up
+< send config HS prefer=phone return=return
+< send state HS away
+> play spotify
+< pause spotify
+< send claim HS 1
+< timer claim 2500
+> recv released HS 1 claim
+< cancel claim
+< take HS
+< timer take 8000
+> headset HS here
+< send state HS here
+< cancel take
+< resume spotify
+> play spotify
+> wait 60000
+> stop spotify
+< timer return 10000
+> wait 10000
+> timer return
+< release HS
+< timer release 4000
+> headset HS away
+< send state HS away
+< cancel release
+< send released HS - return
+end
+
+scenario return on stop resumes what was paused (PC side)
+settings role=pc headsets=HS
+> headset HS here
+> play brave.exe
+> peer up
+> recv config HS prefer=phone return=return
+< send state HS here
+> recv claim HS 1
+< pause brave.exe
+< release HS
+< timer release 4000
+> headset HS away
+< send state HS away
+< cancel release
+< send released HS 1 claim
+> wait 60000
+> recv released HS - return
+< take HS
+< timer take 8000
+> headset HS here
+< send state HS here
+< cancel take
+< resume brave.exe
+end
+
+scenario playing again cancels the pending return
+settings role=phone headsets=HS return=return
+> peer up
+< send config HS prefer=phone return=return
+< send state HS away
+> play spotify
+< pause spotify
+< send claim HS 1
+< timer claim 2500
+> recv released HS 1 claim
+< cancel claim
+< take HS
+< timer take 8000
+> headset HS here
+< send state HS here
+< cancel take
+< resume spotify
+> wait 5000
+> stop spotify
+< timer return 10000
+> play spotify
+< cancel return
+end
+
+scenario stay is the default: stopping keeps the headset
+settings role=phone headsets=HS
+> peer up
+< send config HS prefer=phone return=stay
+< send state HS away
+> play spotify
+< pause spotify
+< send claim HS 1
+< timer claim 2500
+> recv released HS 1 claim
+< cancel claim
+< take HS
+< timer take 8000
+> headset HS here
+< send state HS here
+< cancel take
+< resume spotify
+> wait 5000
+> stop spotify
+end
+
+scenario simultaneous claims: the phone wins
+settings role=phone headsets=HS
+> peer up
+< send config HS prefer=phone return=stay
+< send state HS away
+> play spotify
+< pause spotify
+< send claim HS 1
+< timer claim 2500
+> recv claim HS 1
+> recv released HS 1 claim
+< cancel claim
+< take HS
+< timer take 8000
+end
+
+scenario simultaneous claims: the PC yields
+settings role=pc headsets=HS
+> peer up
+> play brave.exe
+< pause brave.exe
+< send claim HS 1
+< timer claim 2500
+> recv claim HS 1
+< cancel claim
+< send released HS 1 claim
+end
+
+scenario headset connected to both: phone takes the sound from the PC
+settings role=phone headsets=HS
+> headset HS here
+> peer up
+< send config HS prefer=phone return=stay
+< send state HS here
+> recv state HS here
+> play spotify
+< pause spotify
+< send claim HS 1
+< timer claim 2500
+> stop spotify
+> recv state HS away
+> recv released HS 1 claim
+< cancel claim
+< resume spotify
+> play spotify
+end
+
+scenario headset connected to both: PC gives it up
+settings role=pc headsets=HS
+> headset HS here
+> play brave.exe
+> peer up
+> recv config HS prefer=phone return=stay
+< send state HS here
+> recv state HS here
+> recv claim HS 1
+< pause brave.exe
+< release HS
+< timer release 4000
+> headset HS away
+< send state HS away
+< cancel release
+< send released HS 1 claim
+end
+
+scenario headset connected to both: ask rule prompts
+settings role=pc headsets=HS apps=other:ask
+> headset HS here
+> peer up
+> recv config HS prefer=phone return=stay
+< send state HS here
+> recv state HS here
+> play other
+< pause other
+< ask 1 other
+< timer ask 15000
+> answer 1 yes
+< cancel ask
+< send claim HS 1
+< timer claim 2500
+end
+
+scenario headset connected to both: no answer still completes without reconnecting
+settings role=phone headsets=HS
+> headset HS here
+> peer up
+< send config HS prefer=phone return=stay
+< send state HS here
+> recv state HS here
+> play spotify
+< pause spotify
+< send claim HS 1
+< timer claim 2500
+> wait 2500
+> timer claim
+< resume spotify
+end
+
+scenario headset only here: playing does nothing even with the peer up
+settings role=phone headsets=HS
+> headset HS here
+> peer up
+< send config HS prefer=phone return=stay
+< send state HS here
+> recv state HS away
+> play spotify
+end
+
+scenario peer going down forgets the peer's headset state
+settings role=phone headsets=HS
+> headset HS here
+> peer up
+< send config HS prefer=phone return=stay
+< send state HS here
+> recv state HS here
+> peer down
+> play spotify
+end

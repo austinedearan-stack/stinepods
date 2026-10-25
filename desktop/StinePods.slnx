@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="StinePods.Core.Tests/StinePods.Core.Tests.csproj" />
+  <Project Path="StinePods.Core/StinePods.Core.csproj" />
+  <Project Path="StinePods.Windows/StinePods.Windows.csproj" />
+</Solution>
