@@ -14,13 +14,13 @@ purpose and pauses its media, so the other device can connect immediately instea
 
 ## Download
 
-Latest release: **[StinePods 0.2.0](https://github.com/austinedearan-stack/stinepods/releases/tag/v0.2.0)** (setup steps and checksums are on that page)
+Latest release: **[StinePods releases](https://github.com/austinedearan-stack/stinepods/releases/latest)** (setup steps and checksums are on that page)
 
 | | File | For |
 |---|---|---|
-| Phone (recommended) | [StinePods.apk](https://github.com/austinedearan-stack/stinepods/releases/download/v0.2.0/StinePods.apk) | Android 10 – 16 |
-| Phone, with per-app rules | [StinePods-full.apk](https://github.com/austinedearan-stack/stinepods/releases/download/v0.2.0/StinePods-full.apk) | Android 10 – 16 (Google may block this one when sideloaded in some countries) |
-| PC | [StinePods.exe](https://github.com/austinedearan-stack/stinepods/releases/download/v0.2.0/StinePods.exe) | Windows 10 / 11, 64-bit; one file, nothing else to install |
+| Phone (recommended) | [StinePods.apk](https://github.com/austinedearan-stack/stinepods/releases/latest/download/StinePods.apk) | Android 10 – 16 |
+| Phone, with per-app rules | [StinePods-full.apk](https://github.com/austinedearan-stack/stinepods/releases/latest/download/StinePods-full.apk) | Android 10 – 16 (Google may block this one when sideloaded in some countries) |
+| PC | [StinePods.exe](https://github.com/austinedearan-stack/stinepods/releases/latest/download/StinePods.exe) | Windows 10 / 11, 64-bit; one file, nothing else to install |
 
 **Quick setup:** pair phone ↔ PC ↔ headphones over Bluetooth → run `StinePods.exe` on the PC → install the APK
 on the phone, open it, tap **Fix** on each setup item, choose your PC and headphones → confirm the 6-digit code on

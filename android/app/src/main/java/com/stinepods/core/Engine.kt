@@ -67,6 +67,7 @@ class Engine(val settings: Settings) {
         const val TAKE_TIMEOUT_MS = 8000
         const val RELEASE_TIMEOUT_MS = 4000
         const val ASK_TIMEOUT_MS = 15000
+        const val DECLINE_MS = 60 * 60 * 1000
         const val RETURN_DELAY_MS = 10000
         const val COOLDOWN_MS = 3000
         const val EXPECT_WINDOW_MS = 3000
@@ -88,9 +89,10 @@ class Engine(val settings: Settings) {
     private data class Expect(val playing: Boolean, val until: Long)
 
     private val here = mutableSetOf<String>()
-    private val peerHas = mutableSetOf<String>()   // headsets the peer says are connected to it (dual-connection headsets)
+    private val peerHas = mutableSetOf<String>()   // headsets the peer says are connected to it
     private val playing = mutableSetOf<String>()
     private val expect = mutableMapOf<String, Expect>()
+    private val declinedUntil = mutableMapOf<String, Long>()   // apps whose Ask got "Not now"
     private var peerUp = false
     private var callActive = false
     private var returnArmed = false
@@ -157,11 +159,15 @@ class Engine(val settings: Settings) {
     /** Should this app's playback move the headset here? (Also re-run for a deferred play.) */
     private fun decide(app: String, now: Long, a: MutableList<Action>) {
         val h = headset ?: return
-        // Already connected here does nothing, unless the peer holds a second connection to the same headset:
-        // then its stream may be the one being heard, so ask it to let go.
-        if (pending == null && releasing == null && h in here && h !in peerHas) return
+        // Only the peer can hold what we'd take. A headset that is off or still on its way to the peer is claimed
+        // once the peer reports it, if this app is still playing.
+        if (pending == null && releasing == null && h !in peerHas) {
+            if (h !in here) deferred = app
+            return
+        }
         val rule = settings.ruleFor(app)
         if (rule == AppRule.IGNORE) return
+        if (rule == AppRule.ASK && now < (declinedUntil[app] ?: 0)) return
         // Mid-switch or just after one: don't act now (that is where echoes and ping-pong come from), but don't
         // drop the user's play either. Look again once things have settled, if the app is still playing.
         if (pending != null || releasing != null || now < cooldownUntil) {
@@ -213,15 +219,22 @@ class Engine(val settings: Settings) {
             p.phase = Phase.AWAIT_RELEASE
             beginClaim(p, a)
         } else {
-            pending = null
-            p.app?.let { resumeApp(it, now, a) }
+            decline(p, now, a)
         }
+    }
+
+    /** "Not now" (or no answer): resume here and don't ask again for this app until the headset moves. */
+    private fun decline(p: Switch, now: Long, a: MutableList<Action>) {
+        pending = null
+        val app = p.app ?: return
+        declinedUntil[app] = now + DECLINE_MS
+        resumeApp(app, now, a)
     }
 
     private fun onCall(active: Boolean, a: MutableList<Action>) {
         callActive = active
         val h = headset
-        if (active && settings.role == Role.PHONE && settings.callsTakeHeadset && h != null && h !in here && pending == null) {
+        if (active && settings.role == Role.PHONE && settings.callsTakeHeadset && h != null && h in peerHas && h !in here && pending == null) {
             beginClaim(Switch(h, Phase.AWAIT_RELEASE), a)
         }
     }
@@ -257,7 +270,11 @@ class Engine(val settings: Settings) {
             "state" -> {
                 val h = m.h
                 val isHere = m.here
-                if (h != null && isHere != null) if (isHere) peerHas += h else peerHas -= h
+                if (h != null && isHere != null && (if (isHere) peerHas.add(h) else peerHas.remove(h))) {
+                    declinedUntil.clear()
+                    val d = deferred
+                    if (isHere && d != null && d in playing) decide(d, now, a)
+                }
             }
             "claim" -> m.h?.let { onClaim(it, m.id, now, a) }
             "released" -> m.h?.let { onReleased(it, m.why, now) }?.let(a::addAll)
@@ -327,6 +344,7 @@ class Engine(val settings: Settings) {
 
     private fun onHeadsetLink(h: String, isHere: Boolean, now: Long, a: MutableList<Action>) {
         if (peerUp && h in settings.headsets) a += Action.Send(Msg("state", h, here = isHere))
+        declinedUntil.clear()
         if (!isHere) {
             here -= h
             val r = releasing
@@ -369,10 +387,7 @@ class Engine(val settings: Settings) {
                 // Don't leave the user's media paused: let it carry on where it is (speaker or wherever).
                 p.app?.let { resumeApp(it, now, a) }
             }
-            "ask" -> if (p != null && p.phase == Phase.ASK_WAIT) {
-                pending = null
-                p.app?.let { resumeApp(it, now, a) }
-            }
+            "ask" -> if (p != null && p.phase == Phase.ASK_WAIT) decline(p, now, a)
             "release" -> releasing?.let { r ->
                 if (peerUp) a += Action.Send(Msg("released", r.h, r.id, r.why))
                 releasing = null

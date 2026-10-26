@@ -153,6 +153,7 @@ class StinePodsService : Service() {
         val actions = engine.handle(e, now())
         Diag.info("> $e" + if (actions.isEmpty()) "" else "  < " + actions.joinToString(" | ", transform = Describe::of))
         actions.forEach(::execute)
+        if (e is Event.HeadsetLink) updateKeepAlive()
         updateStatus()
     }
 
@@ -164,7 +165,8 @@ class StinePodsService : Service() {
     }
 
     // The link sleeps (Bluetooth sniff) after ~5-8 s of silence and then needs up to ~1.2 s to deliver a message
-    // (docs/spikes/S7-link-latency.md). While something plays here a switch is likely, so keep the link awake.
+    // (docs/spikes/S7-link-latency.md). While something plays here a switch is likely, so keep the link awake, but not
+    // while the headset streams from here: waking the link on the same radio makes the audio stutter.
     private val playingHere = mutableSetOf<String>()
     private var keepingAlive = false
     private val keepAlive = object : Runnable {
@@ -175,7 +177,7 @@ class StinePodsService : Service() {
     }
 
     private fun updateKeepAlive() {
-        val want = playingHere.isNotEmpty() && session?.ready == true
+        val want = playingHere.isNotEmpty() && session?.ready == true && engine.settings.headsets.none(engine::isHere)
         if (want == keepingAlive) return
         keepingAlive = want
         if (want) handler.postDelayed(keepAlive, KEEP_ALIVE_MS) else handler.removeCallbacks(keepAlive)
@@ -199,6 +201,7 @@ class StinePodsService : Service() {
                 N_ASK, "Switch headphones to this phone?",
                 if (a.app == MediaWatch.OTHER) (if (BuildConfig.FULL) "Audio started on this phone." else "Media started playing on this phone.") else "${label(a.app)} started playing.",
                 "Switch" to answer(a.id, true), "Not now" to answer(a.id, false),
+                timeoutMs = Engine.ASK_TIMEOUT_MS.toLong(),
             )
             is Action.StartTimer -> {
                 timers.remove(a.name)?.let(handler::removeCallbacks)
@@ -349,13 +352,14 @@ class StinePodsService : Service() {
         .setContentIntent(PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE))
         .build()
 
-    private fun prompt(id: Int, title: String, text: String, vararg actions: Pair<String, PendingIntent>) {
+    private fun prompt(id: Int, title: String, text: String, vararg actions: Pair<String, PendingIntent>, timeoutMs: Long = 0) {
         val b = Notification.Builder(this, CH_PROMPT)
             .setSmallIcon(R.drawable.ic_stat)
             .setContentTitle(title)
             .setContentText(text)
             .setCategory(Notification.CATEGORY_STATUS)
             .setAutoCancel(true)
+        if (timeoutMs > 0) b.setTimeoutAfter(timeoutMs)
         actions.forEach { (label, pi) -> b.addAction(Notification.Action.Builder(null, label, pi).build()) }
         notifications.notify(id, b.build())
     }

@@ -30,3 +30,7 @@ Thumbs.db
 
 # Build output for distribution
 dist/
+
+# Local session notes
+HANDOFF.md
+android/.kotlin/

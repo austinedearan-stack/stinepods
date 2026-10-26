@@ -117,6 +117,7 @@ internal sealed class Agent(Store store, Tray tray)
         var actions = engine.Handle(e, clock.ElapsedMilliseconds);
         Log.Info($"> {e}" + (actions.Count > 0 ? $"  < {string.Join(" | ", actions.Select(Describe.Of))}" : ""));
         foreach (var a in actions) Execute(a);
+        if (e is HeadsetLink) UpdateKeepAlive();
         UpdateStatus();
     }
 
@@ -301,14 +302,15 @@ internal sealed class Agent(Store store, Tray tray)
     }
 
     // The link sleeps (Bluetooth sniff) after ~5-8 s of silence and then needs up to ~1.2 s to deliver a message
-    // (docs/spikes/S7-link-latency.md). While something plays here a switch is likely, so keep the link awake.
+    // (docs/spikes/S7-link-latency.md). While something plays here a switch is likely, so keep the link awake, but not
+    // while the headset streams from here: waking the link on the same radio makes the audio stutter.
     const int KeepAliveMs = 4000;
     readonly HashSet<string> playingHere = [];
     Timer? keepAlive;
 
     void UpdateKeepAlive()
     {
-        var want = playingHere.Count > 0 && session is { Ready: true };
+        var want = playingHere.Count > 0 && session is { Ready: true } && !store.Settings.Headsets.Any(engine.IsHere);
         if (want && keepAlive is null) keepAlive = new Timer(_ => Post(Ping), null, KeepAliveMs, KeepAliveMs);
         else if (!want && keepAlive is not null) { keepAlive.Dispose(); keepAlive = null; }
     }

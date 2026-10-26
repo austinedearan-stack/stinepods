@@ -57,8 +57,9 @@ pc:                                 pause its media ──► release h ──�
 phone: take h ──► (A2DP connected) ──► resume A
 ```
 
-If no `released` arrives within 2.5 s, or the link is down, the claimer takes the headset on its own (PodSwitch-style
-fallback).
+A play only starts this when the peer's last `state` says it has the headset; a headset that is off stays off, and
+one that later shows up at the peer is claimed then if the app is still playing. If no `released` arrives within
+2.5 s, or the link drops mid-claim, the claimer takes the headset on its own.
 
 ## Coordinator behaviour
 

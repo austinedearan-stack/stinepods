@@ -89,6 +89,8 @@ class MediaWatch(
         // With sessions visible, OTHER is audio from an app without a session: a media key would reach some other
         // (paused) session instead, e.g. start Spotify. Without sessions, the media key is the right tool.
         if (app != OTHER || sessionsVisible) return false
+        // The app ignored our pause and is still playing: a play key now would go to the last session (e.g. Spotify).
+        if (key == KeyEvent.KEYCODE_MEDIA_PLAY && players > 0) return true
         audio.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, key))
         audio.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, key))
         return true

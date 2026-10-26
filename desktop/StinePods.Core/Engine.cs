@@ -58,7 +58,7 @@ public sealed record Notify(string Text) : Action;
 public sealed class Engine(Settings settings)
 {
     public const int ClaimTimeoutMs = 2500, TakeTimeoutMs = 8000, ReleaseTimeoutMs = 4000;
-    public const int AskTimeoutMs = 15000, ReturnDelayMs = 10000, CooldownMs = 3000, ExpectWindowMs = 3000, RetryMs = 500;
+    public const int AskTimeoutMs = 15000, DeclineMs = 60 * 60 * 1000, ReturnDelayMs = 10000, CooldownMs = 3000, ExpectWindowMs = 3000, RetryMs = 500;
 
     enum Phase { AskWait, AwaitRelease, AwaitConnect }
 
@@ -77,9 +77,10 @@ public sealed class Engine(Settings settings)
     public Settings Settings { get; } = settings;
 
     readonly HashSet<string> here = [];
-    readonly HashSet<string> peerHas = [];   // headsets the peer says are connected to it (dual-connection headsets)
+    readonly HashSet<string> peerHas = [];   // headsets the peer says are connected to it
     readonly HashSet<string> playing = [];
     readonly Dictionary<string, (bool Playing, long Until)> expect = [];
+    readonly Dictionary<string, long> declinedUntil = [];   // apps whose Ask got "Not now"
     bool peerUp, callActive, returnArmed;
     string? deferred;   // app whose play arrived mid-switch / in cooldown; re-checked by the "retry" timer
     Switch? pending;
@@ -151,11 +152,16 @@ public sealed class Engine(Settings settings)
     {
         var h = Headset;
         if (h is null) return;
-        // Already connected here does nothing, unless the peer holds a second connection to the same headset:
-        // then its stream may be the one being heard, so ask it to let go.
-        if (pending is null && releasing is null && here.Contains(h) && !peerHas.Contains(h)) return;
+        // Only the peer can hold what we'd take. A headset that is off or still on its way to the peer is claimed
+        // once the peer reports it, if this app is still playing.
+        if (pending is null && releasing is null && !peerHas.Contains(h))
+        {
+            if (!here.Contains(h)) deferred = app;
+            return;
+        }
         var rule = Settings.RuleFor(app);
         if (rule == AppRule.Ignore) return;
+        if (rule == AppRule.Ask && declinedUntil.TryGetValue(app, out var until) && now < until) return;
         // Mid-switch or just after one: don't act now (that is where echoes and ping-pong come from), but don't
         // drop the user's play either. Look again once things have settled, if the app is still playing.
         if (pending is not null || releasing is not null || now < cooldownUntil)
@@ -211,18 +217,23 @@ public sealed class Engine(Settings settings)
             p.Phase = Phase.AwaitRelease;
             BeginClaim(p, a);
         }
-        else
-        {
-            pending = null;
-            if (p.App is { } app) ResumeApp(app, now, a);
-        }
+        else Decline(p, now, a);
+    }
+
+    /// <summary>"Not now" (or no answer): resume here and don't ask again for this app until the headset moves.</summary>
+    void Decline(Switch p, long now, List<Action> a)
+    {
+        pending = null;
+        if (p.App is not { } app) return;
+        declinedUntil[app] = now + DeclineMs;
+        ResumeApp(app, now, a);
     }
 
     void OnCall(bool active, List<Action> a)
     {
         callActive = active;
         if (active && Settings.Role == Role.Phone && Settings.CallsTakeHeadset
-            && Headset is { } h && !here.Contains(h) && pending is null)
+            && Headset is { } h && peerHas.Contains(h) && !here.Contains(h) && pending is null)
             BeginClaim(new Switch { H = h, Phase = Phase.AwaitRelease }, a);
     }
 
@@ -260,7 +271,9 @@ public sealed class Engine(Settings settings)
                 SendStates(a);
                 break;
             case "state" when m.H is { } h && m.Here is { } isHere:
-                if (isHere) peerHas.Add(h); else peerHas.Remove(h);
+                if (!(isHere ? peerHas.Add(h) : peerHas.Remove(h))) break;
+                declinedUntil.Clear();
+                if (isHere && deferred is { } d && playing.Contains(d)) Decide(d, now, a);
                 break;
             case "claim" when m.H is { } h:
                 OnClaim(h, m.Id, now, a);
@@ -331,6 +344,7 @@ public sealed class Engine(Settings settings)
     void OnHeadsetLink(string h, bool isHere, long now, List<Action> a)
     {
         if (peerUp && Settings.Headsets.Contains(h)) a.Add(new Send(new Msg("state", h) { Here = isHere }));
+        declinedUntil.Clear();
         if (!isHere)
         {
             here.Remove(h);
@@ -379,8 +393,7 @@ public sealed class Engine(Settings settings)
                 if (p.App is { } paused) ResumeApp(paused, now, a);
                 break;
             case "ask" when pending is { Phase: Phase.AskWait } p:
-                pending = null;
-                if (p.App is { } app) ResumeApp(app, now, a);
+                Decline(p, now, a);
                 break;
             case "release" when releasing is { } r:
                 if (peerUp) a.Add(new Send(new Msg("released", r.H, r.Id, r.Why)));
